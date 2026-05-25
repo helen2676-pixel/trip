@@ -379,6 +379,7 @@ header p, .header-meta {
 // ═══════════════════════════════════════════
 const STORAGE_KEY = "kyushu_v3";
 const FB_CONFIG_KEY = "kyushu_fb_config_v1";
+const CLIENT_ID = "client_" + Math.random().toString(36).slice(2,10);
 
 const MEAL_SECTIONS = [
   { id: "breakfast", icon: "🌅", label: "조식" },
@@ -540,8 +541,14 @@ function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(itinerary));
   showToast("✅ 저장됨");
   if (fbReady && db) {
-    if (window._fbUpdateLocalTs) window._fbUpdateLocalTs();
-    db.collection("kyushu2026").doc("shared").set({ itinerary, updatedAt: Date.now() }).catch(()=>{});
+    const payload = {
+      itinerary,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: CLIENT_ID
+    };
+    db.collection("kyushu2026").doc("shared")
+      .set(payload, { merge:true })
+      .catch(err => console.error("Firebase save error:", err));
   }
 }
 function load() {
@@ -569,30 +576,60 @@ async function initFb(cfg) {
     }
     db = firebase.firestore();
     const ref = db.collection("kyushu2026").doc("shared");
+
     if (fbUnsub) fbUnsub();
-    let localUpdatedAt = Date.now();
+
     fbUnsub = ref.onSnapshot(snap => {
       if (!snap.exists) return;
+
       const data = snap.data();
-      const remoteAt = data.updatedAt || 0;
-      const r = data.itinerary;
-      // 원격 데이터가 내가 마지막으로 저장한 것보다 새로운 경우에만 반영
-      if (r && remoteAt > localUpdatedAt && JSON.stringify(r) !== JSON.stringify(itinerary)) {
-        itinerary = r;
+      if (!data || !data.itinerary) return;
+
+      const remote = JSON.stringify(data.itinerary);
+      const local = JSON.stringify(itinerary);
+
+      // 내가 저장한 snapshot은 무시
+      if (data.updatedBy === CLIENT_ID) return;
+
+      // 다른 기기의 최신 일정이면 즉시 반영
+      if (remote !== local) {
+        itinerary = data.itinerary;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(itinerary));
         render();
-        showToast("🔄 남편 변경사항 동기화됨");
+        showToast("🔄 공유 일정 업데이트됨");
       }
+    }, err => {
+      console.error("Firestore sync error:", err);
     });
-    // 내가 저장할 때 타임스탬프를 갱신하는 함수 노출
-    window._fbUpdateLocalTs = () => { localUpdatedAt = Date.now(); };
+
+    // 최초 진입 시 서버 데이터 우선 로드
+    const firstSnap = await ref.get();
+    if (firstSnap.exists) {
+      const serverData = firstSnap.data();
+      if (serverData && serverData.itinerary) {
+        itinerary = serverData.itinerary;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(itinerary));
+      }
+    } else {
+      await ref.set({
+        itinerary,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedBy: CLIENT_ID
+      });
+    }
+
     fbReady = true;
     document.getElementById("fb-banner").classList.add("ok");
     document.getElementById("fb-status").textContent = "✅ 연결됨";
     document.getElementById("sync-dot").classList.add("on");
     document.getElementById("sync-label").textContent = "온라인";
+
+    render();
     return true;
-  } catch(e) { console.error(e); return false; }
+  } catch(e) {
+    console.error(e);
+    return false;
+  }
 }
 
 window.saveFirebaseConfig = async function() {
@@ -941,6 +978,7 @@ function onDragStart(e, dayId, sectionId, cardId) {
   setTimeout(() => document.getElementById("card-" + cardId)?.classList.add("dragging"), 0);
 }
 function onDragEnd(e) {
+  stopEdgeScroll();
   document.body.classList.remove("dragging-active");
   document.querySelectorAll(".dragging").forEach(el => el.classList.remove("dragging"));
   clearDropIndicators();
@@ -948,6 +986,7 @@ function onDragEnd(e) {
 }
 function onDragOver(e, dayId, sectionId) {
   e.preventDefault();
+  startEdgeScroll(e.clientY);
   clearDropIndicators();
   const { container, insertBeforeId, card } = getInsertTarget(e, sectionId, dayId);
   if (container) container.classList.add("drag-over");
@@ -966,12 +1005,51 @@ function onDragLeave(e) {
   clearDropIndicators();
 }
 function onDrop(e, toDayId, toSectionId) {
+  stopEdgeScroll();
   e.preventDefault();
   if (!dragState) return;
   const { dayId: fromDayId, sectionId: fromSectionId, cardId, insertBeforeId } = dragState;
   moveCard(fromDayId, fromSectionId, cardId, toDayId, toSectionId, insertBeforeId);
   clearDropIndicators();
   dragState = null;
+}
+
+
+
+// ═══════════════════════════════════════════
+//  EDGE AUTO SCROLL
+// ═══════════════════════════════════════════
+let edgeScrollVelocity = 0;
+let edgeScrollFrame = null;
+
+function startEdgeScroll(pointerY) {
+  const zone = 120;
+  const vh = window.innerHeight;
+
+  if (pointerY < zone) {
+    edgeScrollVelocity = -Math.max(4, ((zone - pointerY) / zone) * 18);
+  } else if (pointerY > vh - zone) {
+    edgeScrollVelocity = Math.max(4, ((pointerY - (vh - zone)) / zone) * 18);
+  } else {
+    stopEdgeScroll();
+    return;
+  }
+
+  if (!edgeScrollFrame) {
+    const step = () => {
+      window.scrollBy(0, edgeScrollVelocity);
+      edgeScrollFrame = requestAnimationFrame(step);
+    };
+    edgeScrollFrame = requestAnimationFrame(step);
+  }
+}
+
+function stopEdgeScroll() {
+  edgeScrollVelocity = 0;
+  if (edgeScrollFrame) {
+    cancelAnimationFrame(edgeScrollFrame);
+    edgeScrollFrame = null;
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -1034,6 +1112,7 @@ function onTouchMove(e) {
   }
   if (!touchDrag || !touchDrag.active || !touchClone) return;
   e.preventDefault();
+  startEdgeScroll(touch.clientY);
   const w = touchClone.offsetWidth;
   const h = touchClone.offsetHeight;
   touchClone.style.left = (touch.clientX - w / 2) + "px";
@@ -1073,6 +1152,7 @@ function onTouchEnd(e) {
     }
     const cardEl = document.getElementById("card-" + touchDrag.cardId);
     if (cardEl) cardEl.style.opacity = "";
+    stopEdgeScroll();
     document.body.classList.remove("dragging-active");
     clearDropIndicators();
 
@@ -1122,13 +1202,29 @@ function moveCard(fromDayId, fromSectionId, cardId, toDayId, toSectionId, insert
 function updateDayTheme(dayId) {
   const day = findDay(dayId);
   if (!day) return;
-  // 전체 카드 중 attraction/restaurant 위주로 주요 장소 추출
+
   const allCards = Object.values(day.sections).flat();
+
   const highlights = allCards
-    .filter(c => c.cat === "attraction" || c.cat === "restaurant")
+    .filter(c =>
+      !c.isGasCard &&
+      c.title &&
+      (c.cat === "attraction" || c.cat === "restaurant")
+    )
+    .map(c => c.title.trim())
+    .filter(title =>
+      title.length > 1 &&
+      !title.includes("체크인") &&
+      !title.includes("복귀") &&
+      !title.includes("출발 준비")
+    )
+    .filter((title, idx, arr) => arr.indexOf(title) === idx)
     .slice(0, 2)
-    .map(c => c.title.length > 8 ? c.title.slice(0,8)+"…" : c.title);
-  if (highlights.length > 0) day.theme = highlights.join(" · ");
+    .map(title => title.length > 8 ? title.slice(0,8) + "…" : title);
+
+  day.theme = highlights.length > 0
+    ? highlights.join(" · ").replace(/(\s*·\s*)+/g, " · ").replace(/^\s*·|·\s*$/g, "").trim()
+    : "일정 조정 중";
 }
 
 // ═══════════════════════════════════════════
@@ -1157,21 +1253,39 @@ function toggleParking(cardId) {
 function openRecommend(dayId, sectionId, cardId) {
   const card = findCard(dayId, sectionId, cardId);
   if (!card) return;
+
   const loc = card.mapQuery || card.title;
+
   const catMap = {
-    restaurant: "子連れ ランチ おすすめ",
-    attraction:  "観光スポット 子供向け",
-    shopping:    "ショッピング",
+    restaurant: "family friendly restaurant",
+    attraction: "family friendly attraction",
+    shopping: "shopping mall",
   };
-  const kw = `${loc} 近く ${catMap[card.cat] || "おすすめ"}`;
+
+  const keyword = `${loc} nearby ${catMap[card.cat] || "top rated place"}`;
+
+  const openMaps = (lat, lng) => {
+    let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(keyword)}`;
+
+    if (lat && lng) {
+      url += `&center=${lat},${lng}`;
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
-      pos => window.open(`https://www.google.com/maps/search/${encodeURIComponent(kw)}/@${pos.coords.latitude},${pos.coords.longitude},15z`, "_blank"),
-      ()  => window.open(`https://www.google.com/maps/search/${encodeURIComponent(kw)}`, "_blank"),
-      { timeout: 4000 }
+      (pos) => openMaps(pos.coords.latitude, pos.coords.longitude),
+      () => openMaps(),
+      {
+        enableHighAccuracy: false,
+        timeout: 5000,
+        maximumAge: 300000
+      }
     );
   } else {
-    window.open(`https://www.google.com/maps/search/${encodeURIComponent(kw)}`, "_blank");
+    openMaps();
   }
 }
 
