@@ -82,6 +82,11 @@ main { padding: 0 0 80px; }
 .meal-add-btn { background: none; border: 1.5px dashed var(--border); border-radius: 8px; padding: 2px 10px; font-size: 0.68rem; color: var(--muted); cursor: pointer; font-family: inherit; }
 .meal-cards { min-height: 8px; padding: 4px 8px; }
 .meal-cards.drag-over { background: #f0fdf4; border-radius: 8px; }
+.drop-indicator { height: 3px; background: #10b981; border-radius: 3px; margin: 2px 0; position: relative; }
+.drop-indicator::before { content:''; position:absolute; left:-4px; top:-4px; width:10px; height:10px; background:#10b981; border-radius:50%; }
+.drop-indicator::after  { content:''; position:absolute; right:-4px; top:-4px; width:10px; height:10px; background:#10b981; border-radius:50%; }
+.sched-card.insert-above { border-top: 3px solid #10b981 !important; }
+.sched-card.insert-below { border-bottom: 3px solid #10b981 !important; }
 
 /* CARD */
 .sched-card {
@@ -178,28 +183,82 @@ main { padding: 0 0 80px; }
 .wh-item { flex-shrink: 0; text-align: center; font-size: 0.65rem; color: #0369a1; }
 .wh-item .wh-time { font-weight: 700; }
 .wh-item .wh-ic { font-size: 1rem; }
+
+/* ── 드래그 중 텍스트 선택 방지 ── */
+body.dragging-active,
+body.dragging-active * { user-select: none !important; -webkit-user-select: none !important; cursor: grabbing !important; }
+
+/* ── 스크롤 시 Firebase+날씨 접히는 영역 ── */
+.collapsible-top {
+  overflow: hidden;
+  max-height: 200px;
+  opacity: 1;
+  transition: max-height 0.32s ease, opacity 0.22s ease;
+}
+.collapsible-top.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 스크롤 후 header 슬림 */
+.sticky-top.scrolled header {
+  padding: 7px 16px 6px;
+}
+.sticky-top.scrolled header p,
+.sticky-top.scrolled .header-meta { display: none; }
+.sticky-top.scrolled header h1 { font-size: 1rem; }
+header p, .header-meta {
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease, margin 0.2s ease;
+  max-height: 60px; opacity: 1;
+}
+.sticky-top.scrolled header p,
+.sticky-top.scrolled .header-meta {
+  display: block !important;
+  max-height: 0 !important;
+  opacity: 0 !important;
+  margin: 0 !important;
+  pointer-events: none;
+}
+
+/* ── 드롭 인서트 라인 ── */
+.drop-indicator { height: 3px; background: #10b981; border-radius: 3px; margin: 2px 0; }
+.sched-card.insert-above { border-top: 3px solid #10b981 !important; }
+.sched-card.insert-below { border-bottom: 3px solid #10b981 !important; }
+
+/* ── 일정추가 인라인 버튼 ── */
+.meal-add-inline { background: none; border: 1.5px solid #d1fae5; border-radius: 20px; padding: 1px 8px; font-size: 0.62rem; color: #059669; cursor: pointer; font-family: inherit; flex-shrink: 0; line-height: 1.6; }
+.meal-add-inline:hover { background: #f0fdf4; }
+
+/* ── 날씨 past ── */
+.weather-day.past { opacity: 0.65; cursor: default; }
 </style>
 </head>
 <body>
 
-<div class="sticky-top">
-  <div class="fb-banner" id="fb-banner">
-    <span>🔥 Firebase</span>
-    <span id="fb-status">⚠️ 미연결 — 로컬 저장만 사용 중</span>
-    <button class="btn-fb" onclick="document.getElementById('setup-modal').classList.add('open')" style="margin-left:auto">🔗 공유 설정</button>
+<div class="sticky-top" id="sticky-top">
+  <!-- 스크롤 시 접히는 영역 -->
+  <div class="collapsible-top" id="collapsible-top">
+    <div class="fb-banner" id="fb-banner">
+      <span>🔥 Firebase</span>
+      <span id="fb-status">⚠️ 미연결 — 로컬 저장만 사용 중</span>
+      <button class="btn-fb" onclick="document.getElementById('setup-modal').classList.add('open')" style="margin-left:auto">🔗 공유 설정</button>
+    </div>
+    <div class="weather-bar" id="weather-bar"><span class="weather-loading">🌤 날씨 불러오는 중...</span></div>
+    <div class="weather-detail" id="weather-detail"></div>
   </div>
+  <!-- 항상 고정 -->
   <header>
     <h1>✈️ 규슈 가족여행 플래너 🇯🇵</h1>
     <p>성인 2명 + 22개월 아기 · 렌터카 여행</p>
     <div class="header-meta">
-      <span class="header-badge">📅 5월 23일 – 27일</span>
-      <span class="header-badge">📍 후쿠오카 · 기타큐슈 · 벳푸 · 유후인</span>
-      <span class="header-badge">🍼 22개월 아기 동반</span>
+      <span class="header-badge">📅 5월 23–27일</span>
+      <span class="header-badge">📍 후쿠오카·기타큐슈·벳푸·유후인</span>
+      <span class="header-badge">🍼 22개월 동반</span>
       <span class="header-badge"><span class="sync-dot" id="sync-dot"></span><span id="sync-label">오프라인</span></span>
     </div>
   </header>
-  <div class="weather-bar" id="weather-bar"><span class="weather-loading">🌤 날씨 불러오는 중...</span></div>
-  <div class="weather-detail" id="weather-detail"></div>
   <nav class="day-nav" id="day-nav"></nav>
   <div class="nearby-strip">
     <span class="nearby-label">📍 현위치 근처:</span>
@@ -207,7 +266,6 @@ main { padding: 0 0 80px; }
     <button class="nearby-btn" onclick="openNearby('uniqlo')">👕 유니클로</button>
     <button class="nearby-btn" onclick="openNearby('convenience')">🏪 편의점</button>
     <button class="nearby-btn" onclick="openNearby('baby')">🍼 유아용품점</button>
-    <button class="nearby-btn" onclick="openNearby('nishimatsuya')">👶 니시마츠야</button>
   </div>
 </div>
 
@@ -315,11 +373,10 @@ const CAT_COLORS = {
 };
 
 const NEARBY_CONFIG = {
-  cafe:         { keyword: "カフェ コーヒー" },
-  uniqlo:       { keyword: "ユニクロ UNIQLO" },
-  convenience:  { keyword: "コンビニ セブンイレブン ファミリーマート ローソン" },
-  baby:         { keyword: "赤ちゃん本舗 アカチャンホンポ ベビー用品" },
-  nishimatsuya: { keyword: "西松屋 ベビー子供用品" },
+  cafe:        { keyword: "カフェ コーヒー" },
+  uniqlo:      { keyword: "ユニクロ UNIQLO" },
+  convenience: { keyword: "コンビニ セブンイレブン ファミリーマート ローソン" },
+  baby:        { keyword: "赤ちゃん本舗 OR 西松屋 ベビー用品 子供用品" },
 };
 
 const PARKING_DATA = {
@@ -432,7 +489,8 @@ function freshItinerary() {
           { id:"d5-1", title:"조식 후 체크아웃", desc:"짐 정리. 여권·항공권·면세 영수증 확인.", time:"08:00", cat:"rest", mapQuery:"" },
         ],
         morning: [
-          { id:"d5-2", title:"주유 후 렌터카 반납", desc:"반납 전 반드시 주유 완료. 외관 사진 촬영 후 반납.", time:"12:00", cat:"transport", mapQuery:"후쿠오카 렌터카 반납" },
+          { id:"d5-gas", title:"⛽ 주유소", desc:"반납 전 주유 필수. 이름 입력 후 지도 검색 가능.", time:"", cat:"transport", mapQuery:"", isGasCard:true },
+          { id:"d5-2", title:"렌터카 반납", desc:"반납 전 외관 사진 촬영 후 반납.", time:"12:00", cat:"transport", mapQuery:"후쿠오카 렌터카 반납" },
         ],
         lunch: [],
         afternoon: [
@@ -440,7 +498,6 @@ function freshItinerary() {
         ],
         dinner: [],
       },
-      gasStations: []
     },
   ]};
 }
@@ -468,8 +525,11 @@ function save() {
 function load() {
   try {
     const s = localStorage.getItem(STORAGE_KEY);
-    if (s) { const p = JSON.parse(s); if (p && p.days) return p; }
-  } catch {}
+    if (s) {
+      const p = JSON.parse(s);
+      if (p && p.days && p.days.length > 0 && p.days[0].sections) return p;
+    }
+  } catch(e) { console.warn("load error:", e); }
   return freshItinerary();
 }
 function newId() { return "c" + Date.now() + Math.random().toString(36).slice(2,6); }
@@ -481,7 +541,10 @@ function loadFbCfg() { try { return JSON.parse(localStorage.getItem(FB_CONFIG_KE
 
 async function initFb(cfg) {
   try {
-    if (firebase.apps.length === 0) firebase.initializeApp(cfg);
+    if (typeof firebase === 'undefined') { console.warn("Firebase SDK 미로드"); return false; }
+    if (firebase.apps.length === 0) {
+      firebase.initializeApp(cfg);
+    }
     db = firebase.firestore();
     const ref = db.collection("kyushu2026").doc("shared");
     if (fbUnsub) fbUnsub();
@@ -521,7 +584,7 @@ async function loadWeather() {
   // 벳푸 좌표 기준 (규슈 여행 중심지)
   const lat = 33.284, lon = 131.491;
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&hourly=weathercode,temperature_2m,precipitation_probability&timezone=Asia%2FTokyo&forecast_days=7`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&hourly=weathercode,temperature_2m,precipitation_probability&timezone=Asia%2FTokyo&forecast_days=7&past_days=7`;
     const res = await fetch(url);
     const d = await res.json();
 
@@ -563,13 +626,39 @@ async function loadWeather() {
     });
 
     // 날씨 바 렌더
+    const todayStr = new Date().toISOString().slice(0,10);
+    const pastMessages = ["✨완료","🎉추억","🌟끝","💫다녀옴","🗓기록"];
     const bar = document.getElementById("weather-bar");
+    const dateShorts = ["5/23","5/24","5/25","5/26","5/27"];
     bar.innerHTML = tripDates.map((date, i) => {
+      const isPast = date < todayStr;
       const w = weatherData[date];
-      if (!w) return `<div class="weather-day"><div class="wd-date">${dayLabels[i]}</div><div class="wd-icon">❓</div></div>`;
-      const rainAlert = w.rainy ? `<div class="wd-rain" style="color:#fde68a">⚠️ 우천</div>` : `<div class="wd-rain">${w.rain || "강수없음"}</div>`;
+      if (!w) {
+        if (isPast) {
+          return `<div class="weather-day past" id="wday-${date}">
+            <div class="wd-date">${dayLabels[i]}</div>
+            <div class="wd-date">${dateShorts[i]}</div>
+            <div class="wd-icon" style="font-size:0.8rem">${pastMessages[i]}</div>
+          </div>`;
+        }
+        return `<div class="weather-day" id="wday-${date}">
+          <div class="wd-date">${dayLabels[i]}</div>
+          <div class="wd-date">${dateShorts[i]}</div>
+          <div class="wd-icon">🌡</div>
+        </div>`;
+      }
+      if (isPast) {
+        return `<div class="weather-day past" id="wday-${date}">
+          <div class="wd-date">${dayLabels[i]}</div>
+          <div class="wd-date">${dateShorts[i]}</div>
+          <div class="wd-icon" style="font-size:0.75rem">${pastMessages[i]}</div>
+          <div class="wd-rain" style="font-size:0.58rem;opacity:0.7">${w.icon} ${w.max}°/${w.min}°</div>
+        </div>`;
+      }
+      const rainAlert = w.rainy ? `<div class="wd-rain" style="color:#fde68a">⚠️ 우천</div>` : `<div class="wd-rain">${w.rain || "맑음"}</div>`;
       return `<div class="weather-day" onclick="toggleWeatherDetail('${date}')" id="wday-${date}">
         <div class="wd-date">${dayLabels[i]}</div>
+        <div class="wd-date" style="font-size:0.6rem">${dateShorts[i]}</div>
         <div class="wd-icon">${w.icon}</div>
         <div class="wd-temp">${w.min}°~${w.max}°</div>
         ${rainAlert}
@@ -682,12 +771,12 @@ function renderDay(day) {
 
   const sectionsHtml = MEAL_SECTIONS.map(ms => {
     const cards = (day.sections[ms.id] || []);
-    const cardsHtml = cards.map(c => renderCard(day.id, ms.id, c)).join("") +
-      `<div class="add-card" onclick="openAddModal('${day.id}','${ms.id}')">＋ 일정 추가</div>`;
+    const cardsHtml = cards.map(c => renderCard(day.id, ms.id, c)).join("");
     return `<div class="meal-section" id="ms-${day.id}-${ms.id}">
       <div class="meal-header">
         <span class="meal-icon">${ms.icon}</span>
         <span class="meal-label">${ms.label}</span>
+        <button class="meal-add-inline" onclick="openAddModal('${day.id}','${ms.id}')">＋ 추가</button>
       </div>
       <div class="meal-cards" id="mc-${day.id}-${ms.id}"
         ondragover="onDragOver(event,'${day.id}','${ms.id}')"
@@ -698,29 +787,7 @@ function renderDay(day) {
     </div>`;
   }).join("");
 
-  // 주유소 섹션 (day5)
-  let gasHtml = "";
-  if (day.isLastDay) {
-    const stations = day.gasStations || [];
-    gasHtml = `<div class="gas-section">
-      <div class="gas-title">⛽ 주유 계획</div>
-      ${stations.map(g => `<div class="gas-row">
-        <span style="flex:1">${g.name}</span>
-        <span style="color:var(--muted);font-size:0.68rem">${g.dist||""} ${g.note||""}</span>
-        <button onclick="deleteGas('${day.id}','${g.id}')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:0.75rem">✕</button>
-      </div>`).join("")}
-      <div class="gas-form" id="gas-form-${day.id}">
-        <input id="gn-${day.id}" placeholder="주유소 이름"/>
-        <input id="ga-${day.id}" placeholder="주소 (선택)"/>
-        <input id="gd-${day.id}" placeholder="거리 (선택)"/>
-        <div style="display:flex;gap:6px;margin-top:4px">
-          <button class="btn-secondary" style="flex:1;border-radius:8px;padding:7px;font-size:0.75rem;border:1px solid var(--border);cursor:pointer;font-family:inherit" onclick="document.getElementById('gas-form-${day.id}').classList.remove('open')">취소</button>
-          <button class="btn-primary" style="flex:1;border-radius:8px;padding:7px;font-size:0.75rem;cursor:pointer;font-family:inherit" onclick="saveGas('${day.id}')">추가</button>
-        </div>
-      </div>
-      <button class="add-card" style="margin-top:6px;width:100%;justify-content:center" onclick="document.getElementById('gas-form-${day.id}').classList.toggle('open')">⛽ 주유소 추가</button>
-    </div>`;
-  }
+  // gas section removed - now handled as cards in morning section
 
   return `<div class="day-section" id="${day.id}">
     <div class="day-header" style="background:${day.color}">
@@ -732,12 +799,33 @@ function renderDay(day) {
     </div>
     <div class="day-body">
       ${sectionsHtml}
-      ${gasHtml}
     </div>
   </div>`;
 }
 
 function renderCard(dayId, sectionId, card) {
+  // 주유 카드 특수 렌더
+  if (card.isGasCard) {
+    const savedName = card.gasName || "";
+    const mq = savedName ? savedName + " ガソリンスタンド" : "";
+    const mapBtnHtml = mq
+      ? `<a href="https://www.google.com/maps/search/${encodeURIComponent(mq)}" target="_blank" class="card-btn primary" style="text-decoration:none">📍 지도</a>`
+      : "";
+    return `<div class="sched-card" id="card-${card.id}" style="background:#fff7ed;border-color:#fed7aa;">
+      <div style="font-size:1.3rem;flex-shrink:0">⛽</div>
+      <div class="card-body">
+        <div class="card-title" style="color:#92400e">주유소</div>
+        <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+          <input id="gas-name-${card.id}" type="text" value="${savedName}"
+            placeholder="주유소 이름 입력 후 지도 검색"
+            style="flex:1;border:1.5px solid #fed7aa;border-radius:8px;padding:5px 8px;font-size:0.75rem;font-family:inherit;"
+            oninput="updateGasCard('${dayId}','${sectionId}','${card.id}',this.value)"/>
+          ${mapBtnHtml}
+        </div>
+        <div style="font-size:0.65rem;color:#b45309;margin-top:4px">반납 전 주유 필수 · 이름 입력 후 📍 지도 버튼</div>
+      </div>
+    </div>`;
+  }
   const color = CAT_COLORS[card.cat] || "#d1d5db";
   const timeHtml = card.time
     ? `<div class="card-time" onclick="toggleTimeEdit('${card.id}')">🕐 ${card.time} <span style="font-size:0.6rem;color:#bbb">(탭해서 수정)</span></div>`
@@ -791,76 +879,149 @@ function renderParking(mapQuery) {
 // ═══════════════════════════════════════════
 let dragState = null;
 
+// 텍스트 선택 완전 차단
+document.addEventListener("selectstart", e => {
+  if (document.body.classList.contains("dragging-active")) e.preventDefault();
+});
+
+function clearDropIndicators() {
+  document.querySelectorAll(".insert-above,.insert-below,.drag-over")
+    .forEach(el => el.classList.remove("insert-above","insert-below","drag-over"));
+}
+
+function getInsertTarget(e, sectionId, dayId) {
+  // 마우스 Y 기준으로 어느 카드 위/아래에 삽입할지 계산
+  const container = document.getElementById(`mc-${dayId}-${sectionId}`);
+  if (!container) return { container, insertBeforeId: null };
+  const cards = [...container.querySelectorAll(".sched-card:not(.dragging)")];
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (e.clientY < midY) return { container, insertBeforeId: card.id.replace("card-",""), card };
+  }
+  return { container, insertBeforeId: null };
+}
+
 function onDragStart(e, dayId, sectionId, cardId) {
   dragState = { dayId, sectionId, cardId };
   e.dataTransfer.effectAllowed = "move";
+  document.body.classList.add("dragging-active");
   setTimeout(() => document.getElementById("card-" + cardId)?.classList.add("dragging"), 0);
 }
 function onDragEnd(e) {
+  document.body.classList.remove("dragging-active");
   document.querySelectorAll(".dragging").forEach(el => el.classList.remove("dragging"));
-  document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+  clearDropIndicators();
+  dragState = null;
 }
 function onDragOver(e, dayId, sectionId) {
   e.preventDefault();
-  document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
-  document.getElementById(`mc-${dayId}-${sectionId}`)?.classList.add("drag-over");
+  clearDropIndicators();
+  const { container, insertBeforeId, card } = getInsertTarget(e, sectionId, dayId);
+  if (container) container.classList.add("drag-over");
+  if (card) card.classList.add("insert-above");
+  else if (container) {
+    const last = container.querySelector(".sched-card:not(.dragging):last-of-type");
+    if (last) last.classList.add("insert-below");
+  }
+  if (dragState) dragState.insertBeforeId = insertBeforeId;
+  if (dragState) dragState.toSectionId = sectionId;
+  if (dragState) dragState.toDayId = dayId;
 }
 function onDragLeave(e) {
-  e.currentTarget.classList.remove("drag-over");
+  // 자식으로 이동하는 경우 무시
+  if (e.currentTarget.contains(e.relatedTarget)) return;
+  clearDropIndicators();
 }
 function onDrop(e, toDayId, toSectionId) {
   e.preventDefault();
   if (!dragState) return;
-  const { dayId: fromDayId, sectionId: fromSectionId, cardId } = dragState;
-  moveCard(fromDayId, fromSectionId, cardId, toDayId, toSectionId);
+  const { dayId: fromDayId, sectionId: fromSectionId, cardId, insertBeforeId } = dragState;
+  moveCard(fromDayId, fromSectionId, cardId, toDayId, toSectionId, insertBeforeId);
+  clearDropIndicators();
   dragState = null;
 }
 
 // ═══════════════════════════════════════════
-//  TOUCH DRAG (Mobile)
+//  TOUCH DRAG (Mobile) - 완전 재작성
 // ═══════════════════════════════════════════
 let touchDrag = null;
 let touchClone = null;
+
+function parseMcId(mcId) {
+  // "mc-day1-breakfast" → { dayId:"day1", sectionId:"breakfast" }
+  const raw = mcId.slice(3); // remove "mc-"
+  const dash = raw.indexOf("-");
+  if (dash === -1) return null;
+  return { dayId: raw.slice(0, dash), sectionId: raw.slice(dash + 1) };
+}
+
+function getTouchInsertTarget(clientX, clientY, mc) {
+  const cards = [...mc.querySelectorAll(".sched-card")].filter(el => el.id !== "card-" + (touchDrag && touchDrag.cardId));
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) {
+      return card.id.replace("card-", "");
+    }
+  }
+  return null;
+}
 
 function onTouchStart(e, dayId, sectionId, cardId) {
   if (e.target.closest("button, a, input")) return;
   const touch = e.touches[0];
   const card = document.getElementById("card-" + cardId);
   const rect = card.getBoundingClientRect();
-  touchDrag = { dayId, sectionId, cardId, startX: touch.clientX, startY: touch.clientY, moved: false };
+  touchDrag = { dayId, sectionId, cardId, startX: touch.clientX, startY: touch.clientY, active: false, insertBeforeId: null };
 
-  // 롱프레스 후 드래그 시작
   touchDrag.timer = setTimeout(() => {
     touchDrag.active = true;
+    document.body.classList.add("dragging-active");
     touchClone = card.cloneNode(true);
-    touchClone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;opacity:0.85;z-index:999;pointer-events:none;transform:scale(1.03);box-shadow:0 12px 32px rgba(0,0,0,0.25);`;
+    touchClone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;opacity:0.88;z-index:9999;pointer-events:none;transform:scale(1.04);box-shadow:0 12px 32px rgba(0,0,0,0.28);border-radius:12px;`;
     document.body.appendChild(touchClone);
-    card.style.opacity = "0.3";
-    navigator.vibrate && navigator.vibrate(40);
-  }, 350);
+    card.style.opacity = "0.25";
+    navigator.vibrate && navigator.vibrate(50);
+  }, 320);
 }
 
 function onTouchMove(e) {
   if (!touchDrag) return;
   const touch = e.touches[0];
-  const dx = touch.clientX - touchDrag.startX;
-  const dy = touch.clientY - touchDrag.startY;
-  if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+  const dx = Math.abs(touch.clientX - touchDrag.startX);
+  const dy = Math.abs(touch.clientY - touchDrag.startY);
+  if ((dx > 8 || dy > 8) && !touchDrag.active) {
     clearTimeout(touchDrag.timer);
-    touchDrag.moved = true;
+    touchDrag = null;
+    return;
   }
-  if (!touchDrag.active || !touchClone) return;
+  if (!touchDrag || !touchDrag.active || !touchClone) return;
   e.preventDefault();
-  touchClone.style.left = (touch.clientX - touchClone.offsetWidth / 2) + "px";
-  touchClone.style.top  = (touch.clientY - touchClone.offsetHeight / 2) + "px";
+  const w = touchClone.offsetWidth;
+  const h = touchClone.offsetHeight;
+  touchClone.style.left = (touch.clientX - w / 2) + "px";
+  touchClone.style.top  = (touch.clientY - h / 2) + "px";
 
-  // 드롭 대상 하이라이트
-  document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+  // 삽입 위치 계산
+  clearDropIndicators();
   touchClone.style.display = "none";
   const under = document.elementFromPoint(touch.clientX, touch.clientY);
   touchClone.style.display = "";
   const mc = under?.closest("[id^='mc-']");
-  if (mc) mc.classList.add("drag-over");
+  if (mc) {
+    mc.classList.add("drag-over");
+    const insertBeforeId = getTouchInsertTarget(touch.clientX, touch.clientY, mc);
+    touchDrag.insertBeforeId = insertBeforeId;
+    touchDrag.dropMcId = mc.id;
+    if (insertBeforeId) {
+      document.getElementById("card-" + insertBeforeId)?.classList.add("insert-above");
+    } else {
+      const cards = mc.querySelectorAll(".sched-card");
+      if (cards.length > 0) cards[cards.length - 1].classList.add("insert-below");
+    }
+  } else {
+    touchDrag.dropMcId = null;
+  }
 }
 
 function onTouchEnd(e) {
@@ -868,31 +1029,20 @@ function onTouchEnd(e) {
   clearTimeout(touchDrag.timer);
 
   if (touchDrag.active && touchClone) {
-    const touch = e.changedTouches[0];
-    touchClone.style.display = "none";
-    const under = document.elementFromPoint(touch.clientX, touch.clientY);
-    touchClone.style.display = "";
-    const mc = under?.closest("[id^='mc-']");
-    document.getElementById("card-" + touchDrag.cardId).style.opacity = "";
-
-    if (mc) {
-      const [, toDayId, toSectionId] = mc.id.split("-").reduce((acc, v, i, arr) => {
-        // mc-day1-breakfast → ["mc","day1","breakfast"]
-        return acc;
-      }, []) || [];
-      // parse from id: mc-{dayId}-{sectionId}
-      // mc-day1-breakfast  →  parts[1]=day1  parts[2]=breakfast
-      const raw = mc.id.slice(3); // remove "mc-"
-      const dashIdx = raw.indexOf("-");
-      if (dashIdx !== -1) {
-        const toDayId    = raw.slice(0, dashIdx);
-        const toSectionId = raw.slice(dashIdx + 1);
-        moveCard(touchDrag.dayId, touchDrag.sectionId, touchDrag.cardId, toDayId, toSectionId);
-      }
-    }
+    const cardEl = document.getElementById("card-" + touchDrag.cardId);
+    if (cardEl) cardEl.style.opacity = "";
     touchClone.remove();
     touchClone = null;
-    document.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+    document.body.classList.remove("dragging-active");
+    clearDropIndicators();
+
+    if (touchDrag.dropMcId) {
+      const parsed = parseMcId(touchDrag.dropMcId);
+      if (parsed) {
+        moveCard(touchDrag.dayId, touchDrag.sectionId, touchDrag.cardId,
+                 parsed.dayId, parsed.sectionId, touchDrag.insertBeforeId);
+      }
+    }
   }
   touchDrag = null;
 }
@@ -900,8 +1050,7 @@ function onTouchEnd(e) {
 // ═══════════════════════════════════════════
 //  MOVE CARD
 // ═══════════════════════════════════════════
-function moveCard(fromDayId, fromSectionId, cardId, toDayId, toSectionId) {
-  if (fromDayId === toDayId && fromSectionId === toSectionId) return;
+function moveCard(fromDayId, fromSectionId, cardId, toDayId, toSectionId, insertBeforeId) {
   const fromDay = findDay(fromDayId);
   const toDay   = findDay(toDayId);
   if (!fromDay || !toDay) return;
@@ -911,9 +1060,35 @@ function moveCard(fromDayId, fromSectionId, cardId, toDayId, toSectionId) {
   const idx = fromSec.findIndex(c => c.id === cardId);
   if (idx === -1) return;
   const [card] = fromSec.splice(idx, 1);
-  toSec.push(card);
+
+  if (insertBeforeId) {
+    // 같은 배열일 경우 splice 후 인덱스 재계산
+    const insertIdx = toSec.findIndex(c => c.id === insertBeforeId);
+    if (insertIdx !== -1) {
+      toSec.splice(insertIdx, 0, card);
+    } else {
+      toSec.push(card);
+    }
+  } else {
+    toSec.push(card);
+  }
+
+  updateDayTheme(fromDayId);
+  updateDayTheme(toDayId);
   save(); render();
   showToast(`📦 ${card.title} 이동 완료`);
+}
+
+function updateDayTheme(dayId) {
+  const day = findDay(dayId);
+  if (!day) return;
+  // 전체 카드 중 attraction/restaurant 위주로 주요 장소 추출
+  const allCards = Object.values(day.sections).flat();
+  const highlights = allCards
+    .filter(c => c.cat === "attraction" || c.cat === "restaurant")
+    .slice(0, 2)
+    .map(c => c.title.length > 8 ? c.title.slice(0,8)+"…" : c.title);
+  if (highlights.length > 0) day.theme = highlights.join(" · ");
 }
 
 // ═══════════════════════════════════════════
@@ -1043,24 +1218,33 @@ function saveAdd() {
 }
 
 // ═══════════════════════════════════════════
-//  GAS STATION
+//  GAS CARD UPDATE
 // ═══════════════════════════════════════════
-function saveGas(dayId) {
-  const name = document.getElementById("gn-" + dayId).value.trim();
-  if (!name) { alert("주유소 이름을 입력해 주세요."); return; }
-  const day = findDay(dayId);
-  if (!day) return;
-  if (!day.gasStations) day.gasStations = [];
-  day.gasStations.push({
-    id: newId(), name,
-    dist: document.getElementById("gd-" + dayId).value.trim(),
-    note: document.getElementById("ga-" + dayId).value.trim(),
-  });
-  save(); render();
-}
-function deleteGas(dayId, gasId) {
-  const day = findDay(dayId);
-  if (day?.gasStations) { day.gasStations = day.gasStations.filter(g => g.id !== gasId); save(); render(); }
+function updateGasCard(dayId, sectionId, cardId, name) {
+  const card = findCard(dayId, sectionId, cardId);
+  if (!card) return;
+  card.gasName = name;
+  // 지도 버튼 동적 업데이트 (re-render 없이)
+  const mq = name ? name + " ガソリンスタンド" : "";
+  const cardEl = document.getElementById("card-" + cardId);
+  if (!cardEl) return;
+  let mapBtn = cardEl.querySelector(".card-btn.primary");
+  if (mq) {
+    if (!mapBtn) {
+      mapBtn = document.createElement("a");
+      mapBtn.className = "card-btn primary";
+      mapBtn.target = "_blank";
+      mapBtn.style.textDecoration = "none";
+      mapBtn.textContent = "📍 지도";
+      const inputEl = cardEl.querySelector("input");
+      inputEl?.parentElement?.appendChild(mapBtn);
+    }
+    mapBtn.href = `https://www.google.com/maps/search/${encodeURIComponent(mq)}`;
+  } else if (mapBtn) {
+    mapBtn.remove();
+  }
+  // 조용히 저장 (toast 없이)
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(itinerary));
 }
 
 // ═══════════════════════════════════════════
@@ -1079,6 +1263,25 @@ loadWeather();
 
 const savedCfg = loadFbCfg();
 if (savedCfg && savedCfg.apiKey) initFb(savedCfg);
+
+// ─── 스크롤 감지: Firebase+날씨 접기 ───
+let lastScrollY = 0;
+let scrollTimer = null;
+const COLLAPSE_THRESHOLD = 60;
+window.addEventListener("scroll", () => {
+  const sy = window.scrollY;
+  const collapsible = document.getElementById("collapsible-top");
+  const sticky = document.getElementById("sticky-top");
+  if (!collapsible || !sticky) return;
+  if (sy > COLLAPSE_THRESHOLD) {
+    collapsible.classList.add("collapsed");
+    sticky.classList.add("scrolled");
+  } else {
+    collapsible.classList.remove("collapsed");
+    sticky.classList.remove("scrolled");
+  }
+  lastScrollY = sy;
+}, { passive: true });
 </script>
 </body>
 </html>
