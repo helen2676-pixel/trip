@@ -201,6 +201,26 @@ body.dragging-active * { user-select: none !important; -webkit-user-select: none
   pointer-events: none;
 }
 
+/* 날씨 바: 스크롤 시 접힘 (header/day-nav 사이에 위치) */
+.weather-bar, .weather-detail {
+  overflow: hidden;
+  transition: max-height 0.32s ease, opacity 0.22s ease, padding 0.22s ease;
+  max-height: 200px;
+  opacity: 1;
+}
+.sticky-top.scrolled .weather-bar {
+  max-height: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+.sticky-top.scrolled .weather-detail {
+  max-height: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* 스크롤 후 header 슬림 */
 .sticky-top.scrolled header {
   padding: 7px 16px 6px;
@@ -238,15 +258,13 @@ header p, .header-meta {
 <body>
 
 <div class="sticky-top" id="sticky-top">
-  <!-- 스크롤 시 접히는 영역 -->
+  <!-- 스크롤 시 접히는 영역 (Firebase 배너만) -->
   <div class="collapsible-top" id="collapsible-top">
     <div class="fb-banner" id="fb-banner">
       <span>🔥 Firebase</span>
       <span id="fb-status">⚠️ 미연결 — 로컬 저장만 사용 중</span>
       <button class="btn-fb" onclick="document.getElementById('setup-modal').classList.add('open')" style="margin-left:auto">🔗 공유 설정</button>
     </div>
-    <div class="weather-bar" id="weather-bar"><span class="weather-loading">🌤 날씨 불러오는 중...</span></div>
-    <div class="weather-detail" id="weather-detail"></div>
   </div>
   <!-- 항상 고정 -->
   <header>
@@ -259,6 +277,9 @@ header p, .header-meta {
       <span class="header-badge"><span class="sync-dot" id="sync-dot"></span><span id="sync-label">오프라인</span></span>
     </div>
   </header>
+  <!-- 날씨 배너: 타이틀과 Day 버튼 사이 -->
+  <div class="weather-bar" id="weather-bar"><span class="weather-loading">🌤 날씨 불러오는 중...</span></div>
+  <div class="weather-detail" id="weather-detail"></div>
   <nav class="day-nav" id="day-nav"></nav>
   <div class="nearby-strip">
     <span class="nearby-label">📍 현위치 근처:</span>
@@ -519,6 +540,7 @@ function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(itinerary));
   showToast("✅ 저장됨");
   if (fbReady && db) {
+    if (window._fbUpdateLocalTs) window._fbUpdateLocalTs();
     db.collection("kyushu2026").doc("shared").set({ itinerary, updatedAt: Date.now() }).catch(()=>{});
   }
 }
@@ -548,12 +570,22 @@ async function initFb(cfg) {
     db = firebase.firestore();
     const ref = db.collection("kyushu2026").doc("shared");
     if (fbUnsub) fbUnsub();
+    let localUpdatedAt = Date.now();
     fbUnsub = ref.onSnapshot(snap => {
-      if (snap.exists) {
-        const r = snap.data().itinerary;
-        if (r && JSON.stringify(r) !== JSON.stringify(itinerary)) { itinerary = r; render(); showToast("🔄 동기화됨"); }
+      if (!snap.exists) return;
+      const data = snap.data();
+      const remoteAt = data.updatedAt || 0;
+      const r = data.itinerary;
+      // 원격 데이터가 내가 마지막으로 저장한 것보다 새로운 경우에만 반영
+      if (r && remoteAt > localUpdatedAt && JSON.stringify(r) !== JSON.stringify(itinerary)) {
+        itinerary = r;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(itinerary));
+        render();
+        showToast("🔄 남편 변경사항 동기화됨");
       }
     });
+    // 내가 저장할 때 타임스탬프를 갱신하는 함수 노출
+    window._fbUpdateLocalTs = () => { localUpdatedAt = Date.now(); };
     fbReady = true;
     document.getElementById("fb-banner").classList.add("ok");
     document.getElementById("fb-status").textContent = "✅ 연결됨";
@@ -950,10 +982,15 @@ let touchClone = null;
 
 function parseMcId(mcId) {
   // "mc-day1-breakfast" → { dayId:"day1", sectionId:"breakfast" }
+  // "mc-day1-morning" 등 dayId는 항상 "dayN" 형태 (첫 번째 세그먼트만)
   const raw = mcId.slice(3); // remove "mc-"
-  const dash = raw.indexOf("-");
-  if (dash === -1) return null;
-  return { dayId: raw.slice(0, dash), sectionId: raw.slice(dash + 1) };
+  // dayId는 "day" + 숫자 형태: 첫 번째 '-' 이후부터 두 번째 '-' 이전
+  const firstDash = raw.indexOf("-");
+  if (firstDash === -1) return null;
+  const dayId = raw.slice(0, firstDash);         // "day1"
+  const sectionId = raw.slice(firstDash + 1);    // "breakfast" (나머지 전체)
+  if (!dayId || !sectionId) return null;
+  return { dayId, sectionId };
 }
 
 function getTouchInsertTarget(clientX, clientY, mc) {
@@ -1028,11 +1065,14 @@ function onTouchEnd(e) {
   if (!touchDrag) return;
   clearTimeout(touchDrag.timer);
 
-  if (touchDrag.active && touchClone) {
+  if (touchDrag.active) {
+    // 항상 clone 제거 (드롭 성공 여부와 무관)
+    if (touchClone) {
+      touchClone.remove();
+      touchClone = null;
+    }
     const cardEl = document.getElementById("card-" + touchDrag.cardId);
     if (cardEl) cardEl.style.opacity = "";
-    touchClone.remove();
-    touchClone = null;
     document.body.classList.remove("dragging-active");
     clearDropIndicators();
 
@@ -1243,8 +1283,12 @@ function updateGasCard(dayId, sectionId, cardId, name) {
   } else if (mapBtn) {
     mapBtn.remove();
   }
-  // 조용히 저장 (toast 없이)
+  // 로컬 + Firebase 저장
   localStorage.setItem(STORAGE_KEY, JSON.stringify(itinerary));
+  if (fbReady && db) {
+    if (window._fbUpdateLocalTs) window._fbUpdateLocalTs();
+    db.collection("kyushu2026").doc("shared").set({ itinerary, updatedAt: Date.now() }).catch(()=>{});
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -1264,7 +1308,7 @@ loadWeather();
 const savedCfg = loadFbCfg();
 if (savedCfg && savedCfg.apiKey) initFb(savedCfg);
 
-// ─── 스크롤 감지: Firebase+날씨 접기 ───
+// ─── 스크롤 감지: Firebase 배너만 접기, 날씨는 유지 ───
 let lastScrollY = 0;
 let scrollTimer = null;
 const COLLAPSE_THRESHOLD = 60;
